@@ -33,7 +33,7 @@ PyPI and in each project's LICENSE file on 2026-11-13.
 | packaging | 26.3 | Donald Stufft and contributors | Apache-2.0 OR BSD-2-Clause | https://github.com/pypa/packaging |
 | Pillow | 13.0.0 | Jeffrey A. Clark and contributors | MIT-CMU | https://github.com/python-pillow/Pillow |
 | pyparsing | 3.3.3 | Paul McGuire | MIT | https://github.com/pyparsing/pyparsing |
-| python-dateutil | 4.0.0 | dateutil contributors | BSD-3-Clause | https://github.com/dateutil/dateutil |
+| python-dateutil | 4.0.0 | dateutil contributors | Apache-2.0 AND BSD-3-Clause (dual: newer contributions Apache-2.0) | https://github.com/dateutil/dateutil |
 | six | 1.17.0 | Benjamin Peterson | MIT | https://github.com/benjaminp/six |
 
 `processor/resources.py` is shared with the other Pennsieve processor apps (Apache-2.0).

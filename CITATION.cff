@@ -171,6 +171,32 @@ references:
     value: '30337883'
     description: PMID
 - type: article
+  title: A Universal Scaling Relation for Defining Power Spectral Bands in Mammalian Heart Rate Variability Analysis
+  authors:
+  - family-names: Behar
+    given-names: Joachim A.
+  - family-names: Rosenberg
+    given-names: Aviv A.
+  - family-names: Shemla
+    given-names: Ori
+  - family-names: Murphy
+    given-names: Kevin R.
+  - family-names: Koren
+    given-names: Gideon
+  - family-names: Billman
+    given-names: George E.
+  - family-names: Yaniv
+    given-names: Yael
+  doi: 10.3389/fphys.2018.01001
+  year: 2018
+  journal: Frontiers in Physiology
+  volume: '9'
+  start: '1001'
+  identifiers:
+  - type: other
+    value: '30116198'
+    description: PMID
+- type: article
   title: 'Heart rate variability in mice: a theoretical and practical guide'
   authors:
   - family-names: Thireau

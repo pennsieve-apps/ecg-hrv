@@ -86,15 +86,15 @@ also resampled to a regular `SERIES_HZ` grid by linear interpolation between NN 
   upper edge (250 s for 0.04 Hz). Poincaré: 20 NN intervals; DFA α1 (boxes 4-15 beats): 60; DFA α2
   (boxes 16 to min(128, n/4)): 256; sample entropy (m = 2, r = 0.2 SD): 200.
 - **Spectra.** NN intervals resampled at max(4 Hz, 2.25 × 1.1 × the HF upper edge) (PhysioZoo's
-  rule), Welch. LF/HF normalised units are LF/(LF+HF) and HF/(LF+HF) × 100, as the Task Force
+  2.25 factor; the 1.1 margin and the 4 Hz floor are Pennsieve additions), Welch. LF/HF normalised units are LF/(LF+HF) and HF/(LF+HF) × 100, as the Task Force
   defines them (not NeuroKit2's LF/total power).
 
 ### Species presets
 
 Every value can be overridden by its own parameter. `provenance.json` lists the preset used for each
 recording. Sources: **TF** Task Force 1996; **PZ** Behar et al. 2018 (PhysioZoo) Table 2, Table 3
-and the numbers in its `Config/qrs.<species>-ecg.yml`; PZ's mouse bands come from Thireau et al.
-2008; **CARN** Carnevali et al. 2023; **POL/SAL** Poletto et al. 2011 (pig LF 0.0-0.09 Hz, HF
+and the numbers in its `Config/qrs.<species>-ecg.yml`; PZ's mouse bands come from Behar et al.
+2018 (*Front Physiol* 9:1001), with the HF upper edge raised to 5 Hz after Thireau et al. 2008; **CARN** Carnevali et al. 2023; **POL/SAL** Poletto et al. 2011 (pig LF 0.0-0.09 Hz, HF
 0.09-2.0 Hz from pharmacological blockade in conscious pigs) as split into VLF/LF at 0.02 Hz by
 Salomão et al. 2015 in anaesthetised pigs; **NK** NeuroKit2 defaults; **PENN** a Pennsieve choice
 where nothing is published, checked on the demo data.
@@ -282,7 +282,9 @@ lists in CITATION.cff.
   e215. doi:10.1161/01.CIR.101.23.e215, PMID 10851218.
 - Species presets: Behar, J. A. et al. (2018). PhysioZoo: A Novel Open Access Platform for Heart
   Rate Variability Analysis of Mammalian Electrocardiographic Data. *Frontiers in Physiology* 9,
-  1390. doi:10.3389/fphys.2018.01390, PMID 30337883. Thireau, J. et al. Heart rate variability in
+  1390. doi:10.3389/fphys.2018.01390, PMID 30337883. Behar, J. A. et al. (2018). A Universal Scaling
+  Relation for Defining Power Spectral Bands in Mammalian Heart Rate Variability Analysis.
+  *Frontiers in Physiology* 9, 1001. doi:10.3389/fphys.2018.01001, PMID 30116198. Thireau, J. et al. Heart rate variability in
   mice: a theoretical and practical guide. *Experimental Physiology* 93, 83-94.
   doi:10.1113/expphysiol.2007.040733, PMID 17911354. Carnevali, L. et al. (2023). Sex differences in
   heart rate and heart rate variability in rats: Implications for translational research.

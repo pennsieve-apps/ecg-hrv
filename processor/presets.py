@@ -10,7 +10,9 @@ Sources (verified DOIs, full references in CITATION.cff):
          Table 2 (RRmin, RRmax, typical HR and QRS duration), Table 3 (bands, pNNxx), and the
          PhysioZoo configuration files Config/qrs.<species>-ecg.yml (jqrs band-pass lcf/hcf and
          refractory period rp). Numbers only; no PhysioZoo code is used (it is GPL-3.0).
-         PZ's mouse bands are taken from Thireau et al. 2008 (doi:10.1113/expphysiol.2007.040733).
+         PZ's mouse bands come from Behar et al. 2018, Front Physiol 9:1001, doi:10.3389/fphys.2018.01001
+         (Gaussian-mixture bands), with the HF upper edge raised to 5 Hz after Thireau et al. 2008
+         (doi:10.1113/expphysiol.2007.040733).
   CARN   Carnevali et al. 2023, Front Physiol 14:1170320, doi:10.3389/fphys.2023.1170320:
          rat "LF, 0.2-0.75 Hz" and "HF, 0.75-2.5 Hz".
   POL    Poletto et al. 2011, Physiol Behav 103:188, doi:10.1016/j.physbeh.2011.01.019: pig bands
@@ -101,7 +103,7 @@ PRESETS: dict[str, Preset] = {
         "mouse", 608, 0.00718, 0.05, 0.24, (3.0, 300.0), 0.030, *_scaled_nk(608, 0.00718),
         (0.0056, 0.152), (0.152, 1.24), (1.24, 5.0), 5, 10, 0.5, 10, 10,
         {"detector": _PZ_DET + "; NK windows scaled to HR and QRS",
-         "bands": _PZ_HRV + " (from Thireau et al. 2008)", "pnn": _PZ_HRV, "other": _PENN_COMMON}),
+         "bands": _PZ_HRV + " (from Behar et al. 2018b; HF upper edge 5 Hz after Thireau et al. 2008)", "pnn": _PZ_HRV, "other": _PENN_COMMON}),
     "rat": Preset(
         # No published PhysioZoo rat preset: detector numbers are a Pennsieve choice between the
         # rabbit and mouse presets, wide enough for anaesthetised rats and for vagal bradycardia

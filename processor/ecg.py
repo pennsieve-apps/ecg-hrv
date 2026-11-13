@@ -369,8 +369,9 @@ def _welch_peaks(nn_ms, nn_t, s: Settings, interp_hz: float) -> dict:
 
 
 def interp_rate(s: Settings) -> float:
-    """Resampling rate of the RR series for spectra: at least 4 Hz, and 2.25 x the upper edge of
-    the band above HF (PhysioZoo's rule, Behar et al. 2018)."""
+    """Resampling rate of the RR series for spectra: 2.25 x the HF upper edge (PhysioZoo's factor,
+    Behar et al. 2018) with a 10 % margin for the band above HF, and at least 4 Hz (Pennsieve
+    additions)."""
     return float(max(4.0, math.ceil(2.25 * s.bands["hf"][1] * 1.1)))
 
 
