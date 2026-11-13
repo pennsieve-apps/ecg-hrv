@@ -1,0 +1,224 @@
+# yaml-language-server: $schema=https://schemas.pennsieve.io/app-manifest/v1.json
+schemaVersion: "1.0"
+application:
+  name: ECG Heart Rate and HRV
+  description: >-
+    R-peaks, beat labels, heart rate and heart rate variability from the ECG of humans and animals,
+    built on NeuroKit2 (Makowski et al. 2021). Detects R-peaks with NeuroKit2 (seven detectors to
+    choose from) using species presets for the filter band, refractory period and heart-rate range
+    (human, pig, dog, rabbit, rat, mouse; sources in the README), checks them against a second
+    detector (WFDB XQRS), corrects inverted leads and removes mains interference, labels ectopic and
+    artifact beats (Lipponen and Tarvainen 2019, as NeuroKit2 implements it), and computes Task Force
+    HRV metrics (time domain, frequency domain with species bands, Poincare, DFA, sample entropy) over
+    each recording and, when stimulation events are linked, before, during and after each train. Writes
+    heart rate on a regular grid (series.csv) for dose-response analysis, and passes device heart-rate
+    channels through for comparison. Reads the NWB recordings of physio-import or any NWB file with ECG;
+    recordings without ECG are skipped, not failed. Research outputs, not a clinical ECG interpretation.
+  type: processor
+  tags:
+    - physiology
+    - autonomic
+    - cardiovascular
+    - ecg
+    - heart-rate-variability
+    - electrophysiology
+    - neuromodulation
+    - nerve-stimulation
+    - nwb
+    - quality-control
+runtime:
+  # Single-threaded; one recording at a time, the ECG read in CHUNK_S windows. Measured in Docker
+  # (amd64 emulation on an M-series Mac, --cpus 1 --memory 1g, read-only, any uid): cgroup
+  # memory.peak 279-334 MB on the five demo sources; ~9 s per 2 h Fantasia recording (README
+  # "Runtime"). 1024 cpu / 2048 MiB is the smallest Fargate pair with one full vCPU.
+  cpu: 1024
+  memory: 2048
+  computeTypes:
+    - standard
+  timeoutSeconds: 900
+parameters:
+  - name: SPECIES
+    type: string
+    label: Species
+    description: >-
+      Species preset: heart-rate range, detector filter band and refractory period, HRV frequency bands,
+      pNNx threshold, series rate and stimulation windows (sources in the README). auto takes the species
+      from recordings.csv or the NWB Subject, else human.
+    defaultValue: auto
+    validValues: [auto, human, pig, dog, rabbit, rat, mouse]
+  - name: DETECTOR
+    type: string
+    label: R-peak detector
+    description: >-
+      NeuroKit2 R-peak detector. neurokit (default) follows the species preset's timing; the others keep
+      their published (human) constants, with only the preset's refractory period applied.
+    defaultValue: neurokit
+    validValues: [neurokit, pantompkins1985, hamilton2002, elgendi2010, engzeemod2012, kalidas2017, rodrigues2021]
+  - name: ECG_CHANNEL
+    type: string
+    label: ECG channel
+    description: >-
+      Channel to analyse (NWB name such as ecg-2, or the original name). auto takes the first ECG channel
+      that channels.csv does not mark flat or saturated; a second ECG lead, when present, is used to check
+      the beats (qc.csv agreement_other_lead).
+    defaultValue: auto
+  - name: INVERT
+    type: string
+    label: Invert lead
+    description: auto detects an inverted lead (NeuroKit2's ecg_invert rule); true or false forces it.
+    defaultValue: auto
+    validValues: [auto, "true", "false"]
+  - name: ARTIFACT_CORRECTION
+    type: string
+    label: Beat labelling
+    description: >-
+      kubios labels ectopic, missed, extra and long/short beats (Lipponen and Tarvainen 2019) plus RR
+      intervals outside the preset's range; range labels only out-of-range intervals; none keeps every beat.
+    defaultValue: kubios
+    validValues: [kubios, range, none]
+  - name: ARTIFACT_MIN_PCT
+    type: number
+    label: Minimum artifact deviation (%)
+    description: >-
+      A beat flagged by the kubios classes is labelled only when its RR interval differs from the median of
+      the 11 around it by more than this percentage (keeps the regular rhythm of anaesthetised animals from
+      being over-labelled). 0 keeps every flag.
+    defaultValue: 10
+    min: 0
+  - name: SECOND_DETECTOR
+    type: boolean
+    label: Second detector
+    description: Run WFDB XQRS on the same ECG and report the agreement in qc.csv.
+    defaultValue: true
+  - name: FILTER_BAND
+    type: string
+    label: Filter band (Hz)
+    description: Band-pass before R-peak detection, e.g. 3-100; auto takes the species preset.
+    defaultValue: auto
+  - name: REFRACTORY_S
+    type: number
+    label: Refractory period (s)
+    description: Shortest time between two R-peaks; 0 takes the species preset.
+    defaultValue: 0
+    min: 0
+  - name: RR_RANGE_S
+    type: string
+    label: RR range (s)
+    description: Plausible RR intervals, e.g. 0.28-2.4; intervals outside are labelled artifact. auto takes the preset.
+    defaultValue: auto
+  - name: VLF_BAND
+    type: string
+    label: VLF band (Hz)
+    description: Very-low-frequency band, e.g. 0.003-0.04; auto takes the species preset.
+    defaultValue: auto
+  - name: LF_BAND
+    type: string
+    label: LF band (Hz)
+    description: Low-frequency band, e.g. 0.04-0.15; auto takes the species preset.
+    defaultValue: auto
+  - name: HF_BAND
+    type: string
+    label: HF band (Hz)
+    description: High-frequency band, e.g. 0.15-0.4; auto takes the species preset.
+    defaultValue: auto
+  - name: PNN_THRESHOLD_MS
+    type: number
+    label: pNNx threshold (ms)
+    description: Threshold of the pNNx metric (pnn50 is always written too); 0 takes the species preset.
+    defaultValue: 0
+    min: 0
+  - name: SERIES_HZ
+    type: number
+    label: Series rate (Hz)
+    description: Rate of the heart-rate grid in series.csv; 0 takes the preset (4 Hz large animals, 10 Hz rodents).
+    defaultValue: 0
+    min: 0
+  - name: MAX_GAP_S
+    type: number
+    label: Maximum gap (s)
+    description: series.csv points between NN beats further apart than this are marked valid=false; 0 takes the preset.
+    defaultValue: 0
+    min: 0
+  - name: BASELINE_S
+    type: number
+    label: Baseline window (s)
+    description: HRV window before each stimulation onset (cut at the previous train); 0 takes the preset.
+    defaultValue: 0
+    min: 0
+  - name: AFTER_S
+    type: number
+    label: After window (s)
+    description: HRV window after each stimulation train (cut at the next train); 0 takes the preset.
+    defaultValue: 0
+    min: 0
+  - name: POWERLINE_HZ
+    type: string
+    label: Mains notch
+    description: auto notches 50 or 60 Hz (and harmonics) when the line stands out of the ECG spectrum; 0 never, 50 or 60 always.
+    defaultValue: auto
+    validValues: [auto, "0", "50", "60"]
+  - name: FIGURES
+    type: boolean
+    label: Figures
+    description: Write two figures per recording (heart rate with an ECG excerpt; Poincare plot and RR spectrum).
+    defaultValue: true
+  - name: CHUNK_S
+    type: number
+    label: Chunk (s)
+    description: Seconds of ECG read and processed at a time.
+    defaultValue: 300
+    min: 10
+  - name: THREADS
+    type: integer
+    label: Threads
+    description: BLAS threads; 0 = from the container's CPU quota, capped by its memory.
+    defaultValue: 0
+    min: 0
+inputs:
+  - name: physio
+    description: >-
+      The physio output of physio-import (recordings.csv, channels.csv and one NWB file per recording), or
+      any NWB 2.x files with ECG TimeSeries in /acquisition. Found anywhere under the input folder.
+    mediaTypes:
+      - application/x-hdf5; profile=nwb
+      - text/csv
+      - text/tab-separated-values
+      - application/json
+    placement: subfolder
+    required: true
+  - name: events
+    description: >-
+      Optional: the events output of stim-events (events.tsv with stimulation trains). HRV is then also
+      computed before, during and after each train.
+    mediaTypes:
+      - text/tab-separated-values
+      - text/csv
+      - application/json
+      - image/png
+    placement: subfolder
+    required: false
+outputs:
+  - name: hrv
+    description: >-
+      ecg-hrv/: beats.csv, series.csv (heart rate and RR on a regular grid, plus device heart rate), hrv.csv
+      (per recording and per stimulation phase), qc.csv, features.csv, figures/*.png, summary.json
+      (headline numbers and captioned figures) and provenance.json.
+    mediaTypes:
+      - text/csv
+      - application/json
+      - image/png
+
+# How a release is tested before it is made public: the inputs a review run uses.
+# See app-deploy-service docs/app-manifest-review.md. The generator also writes truth.json, so each
+# port takes only its own subtree.
+review:
+  version: 1
+  inputs:
+    physio:
+      generate:
+        command: python -m tests.make_fixture "$REVIEW_INPUT_DIR"
+        root: physio
+    events:
+      generate:
+        command: python -m tests.make_fixture "$REVIEW_INPUT_DIR"
+        root: events

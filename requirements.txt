@@ -1,0 +1,36 @@
+# Runtime dependencies, resolved on python:3.12.16-slim-bookworm (linux/amd64) and installed with
+# --no-deps --only-binary=:all: (every package is listed here, wheels only). Latest on PyPI on
+# 2026-11-13.
+# NeuroKit2: ECG cleaning, R-peak detectors, artefact classes (signal_fixpeaks "Kubios"), HRV.
+neurokit2==0.3.0
+# WFDB for Python: the XQRS second detector (and the Fantasia validation script).
+wfdb==4.3.1
+numpy==2.5.4
+scipy==1.18.1
+pandas==3.1.1
+h5py==3.16.0
+matplotlib==3.11.2
+# NeuroKit2 imports these at start-up
+scikit-learn==1.9.1
+joblib==1.6.0
+cloudpickle==3.1.2
+threadpoolctl==3.8.0
+narwhals==2.28.0
+PyWavelets==1.10.0
+requests==2.34.2
+certifi==2026.10.23
+charset-normalizer==3.5.2
+idna==3.20
+urllib3==2.8.0
+# wfdb imports fsspec at start-up (remote records; never used: no network at run time)
+fsspec==2026.9.0
+# matplotlib and pandas dependencies
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.68.0
+kiwisolver==1.5.1
+packaging==26.3
+pillow==13.0.0
+pyparsing==3.3.3
+python-dateutil==4.0.0
+six==1.17.0

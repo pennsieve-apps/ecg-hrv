@@ -1,0 +1,5 @@
+-r requirements.txt
+# tests: pytest; pynwb only to check that the fixture is valid NWB (the app reads NWB with h5py)
+pytest==9.2.0
+pynwb==4.2.0
+pyyaml==6.0.3
