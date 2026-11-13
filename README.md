@@ -48,7 +48,8 @@ detected beats, so you can see at a glance whether detection worked.
 **For the data scientist.** Per recording, one ECG channel (`channels.csv` type `ecg`, else name
 heuristics) is read from NWB with h5py in `CHUNK_S` windows (plus 2 s on each side; peaks are kept
 in each window's core), band-passed (zero-phase Butterworth, species band) and, when a 50/60 Hz
-line stands out of the spectrum, notched. NeuroKit2 `ecg_findpeaks` finds R-peaks; wfdb XQRS runs
+line stands out of the spectrum, notched. NeuroKit2 `ecg_findpeaks` finds R-peaks, which are then
+moved to a stable fiducial by template alignment (Method details); wfdb XQRS runs
 on the same windows (high-passed at 0.5 Hz) and the two are matched one to one within
 min(50 ms, 0.3 × RRmin). Lead polarity follows NeuroKit2's `ecg_invert` rule. Beats are labelled
 with NeuroKit2's `signal_fixpeaks(method="Kubios")` classes on the detected beats (not corrected
@@ -60,6 +61,13 @@ also resampled to a regular `SERIES_HZ` grid by linear interpolation between NN 
 (`series.csv`), the shared shape that stim-dose-response reads.
 
 ### Method details
+
+- **Beat timing (fiducial).** A detector's peak is the highest (or deepest) sample, which jumps
+  between two lobes of near-equal size in a notched or biphasic QRS (the rat ECG of dataset 655 has
+  two negative lobes about 7 ms apart) and adds RR jitter of the lobe spacing. Every beat is
+  therefore aligned to the median QRS template of its window by cross-correlation (lags up to half
+  a QRS width, sub-sample by parabolic interpolation) and timed at the template's largest
+  deflection; beats that do not match the template (correlation < 0.5) keep the detector's peak.
 
 - **Filter and detector.** Band-pass and refractory period from the preset (PhysioZoo's jqrs
   band-pass and refractory values for human, dog, rabbit, mouse). The `neurokit` detector's
@@ -75,15 +83,21 @@ also resampled to a regular `SERIES_HZ` grid by linear interpolation between NN 
   one; the app labels the premature beat of the pair (the shorter interval). `artifact`: NeuroKit2's
   missed, extra and long/short classes, and RR intervals outside the preset's RR range. A flag is
   kept only when the RR interval differs from the median of the 11 around it by more than
-  `ARTIFACT_MIN_PCT` (10 %): Lipponen and Tarvainen's thresholds scale with the beat-to-beat
+  `ARTIFACT_MIN_PCT` (10 %). **This gate is ours and changes Lipponen and Tarvainen's method**: the
+  labels are their classes, kept only where the gate agrees. `qc.csv` `pct_lipponen_flagged_ungated`
+  gives the share of beats their method flags without the gate, and `provenance.json`
+  `recordings.<id>.beat_labels` states the method and every count. Lipponen and Tarvainen's thresholds scale with the beat-to-beat
   variability, and in the very regular rhythm of anaesthetised animals (RR changes of 1-2 ms) they
   labelled 2-5 % of ordinary rat beats as ectopic (dataset 655) before this rule.
 - **Minimum windows.** An HRV metric is left empty, with the reason in `qc.csv` `notes`, when its
   window is too short. Time domain (SDNN, RMSSD, pNN50, pNNx): at least 10 NN intervals (mean NN and
-  mean heart rate: 2). Frequency domain: NN intervals covering at least 80 % of the window, and the
-  Task Force rule applied to each species' band edges: HF needs 10 cycles of its lower edge (1 min
-  for the human 0.15 Hz), LF 4.8 cycles of its lower edge (2 min for 0.04 Hz), VLF 10 cycles of its
-  upper edge (250 s for 0.04 Hz). Poincaré: 20 NN intervals; DFA α1 (boxes 4-15 beats): 60; DFA α2
+  mean heart rate: 2). Frequency domain: NN intervals covering at least 80 % of the window, and a
+  window of at least 10 cycles of the band's lower edge. **This rule is ours** (Pennsieve), applied
+  the same way to every band and species: secondary sources attribute "at least 10 times the
+  wavelength of the lower frequency bound" to the Task Force, whose standard short-term window is
+  5 min (as tabulated by Behar et al. 2018, Table 3). Human: HF 67 s, LF 250 s, VLF 3333 s, so VLF
+  and total power come only from recordings of about an hour or more; a band starting at 0 Hz (pig
+  VLF) uses 0.0033 Hz. Poincaré: 20 NN intervals; DFA α1 (boxes 4-15 beats): 60; DFA α2
   (boxes 16 to min(128, n/4)): 256; sample entropy (m = 2, r = 0.2 SD): 200.
 - **Spectra.** NN intervals resampled at max(4 Hz, 2.25 × 1.1 × the HF upper edge) (PhysioZoo's
   2.25 factor; the 1.1 margin and the 4 Hz floor are Pennsieve additions), Welch. LF/HF normalised units are LF/(LF+HF) and HF/(LF+HF) × 100, as the Task Force
@@ -94,7 +108,7 @@ also resampled to a regular `SERIES_HZ` grid by linear interpolation between NN 
 Every value can be overridden by its own parameter. `provenance.json` lists the preset used for each
 recording. Sources: **TF** Task Force 1996; **PZ** Behar et al. 2018 (PhysioZoo) Table 2, Table 3
 and the numbers in its `Config/qrs.<species>-ecg.yml`; PZ's mouse bands come from Behar et al.
-2018 (*Front Physiol* 9:1001), with the HF upper edge raised to 5 Hz after Thireau et al. 2008; **CARN** Carnevali et al. 2023; **POL/SAL** Poletto et al. 2011 (pig LF 0.0-0.09 Hz, HF
+2018 (*Front Physiol* 9:1001), with the HF upper edge raised to 5 Hz after Thireau et al. 2007; **CARN** Carnevali et al. 2023; **POL/SAL** Poletto et al. 2011 (pig LF 0.0-0.09 Hz, HF
 0.09-2.0 Hz from pharmacological blockade in conscious pigs) as split into VLF/LF at 0.02 Hz by
 Salomão et al. 2015 in anaesthetised pigs; **NK** NeuroKit2 defaults; **PENN** a Pennsieve choice
 where nothing is published, checked on the demo data.
@@ -109,7 +123,7 @@ where nothing is published, checked on the demo data.
 | VLF (Hz) | 0.003-0.04 (TF) | 0.0033-0.067 (PZ) | 0.0033-0.088 (PZ) | 0.0056-0.152 (PZ) | 0.0033-0.2 (CARN; lower edge as PZ) | 0.0-0.02 (SAL) |
 | LF (Hz) | 0.04-0.15 (TF) | 0.067-0.235 (PZ) | 0.088-0.341 (PZ) | 0.152-1.24 (PZ) | 0.2-0.75 (CARN) | 0.02-0.09 (POL, SAL) |
 | HF (Hz) | 0.15-0.4 (TF) | 0.235-0.877 (PZ) | 0.341-1.155 (PZ) | 1.24-5 (PZ) | 0.75-2.5 (CARN) | 0.09-2.0 (POL) |
-| shortest window HF / LF / VLF (s) | 67 / 120 / 250 | 43 / 72 / 149 | 29 / 55 / 114 | 8 / 32 / 66 | 13 / 24 / 50 | 111 / 240 / 500 |
+| shortest window HF / LF / VLF (s) | 67 / 250 / 3333 | 43 / 149 / 3030 | 29 / 114 / 3030 | 8 / 66 / 1786 | 13 / 50 / 3030 | 111 / 500 / 3030 |
 | pNNx threshold (ms) | 50 (TF) | 25 (PZ) | 17 (PZ) | 5 (PZ) | 10 (PENN) | 50 (PENN) |
 | series grid (Hz) | 4 | 4 | 10 | 10 | 10 | 4 |
 | max gap in series (s) | 3 | 2 | 1 | 0.5 | 1 | 3 |
@@ -125,7 +139,7 @@ animals, 10 Hz for rodents).
 | Port | Direction | What |
 |---|---|---|
 | `physio` | input (required) | physio-import's `physio` output: `recordings.csv`, `channels.csv`, NWB per recording; or any NWB 2.x files with ECG |
-| `events` | input (optional) | stim-events' `events.tsv` (rows with `trial_type` `stimulation` or `block`); physio-import's own `events.tsv` markers are ignored |
+| `events` | input (optional) | stim-events' `events.tsv` (rows with `trial_type` `stimulation` or `block`). physio-import's own `events.tsv` (the one beside `recordings.csv`: raw markers) is never read |
 | `hrv` | output | `ecg-hrv/` with the tables, figures, `summary.json` and `provenance.json` below |
 
 Files are found by name and content anywhere under `INPUT_DIR` (following symlinks), so the ports
@@ -137,7 +151,7 @@ also work merged side by side.
 |---|---|---|
 | `SPECIES` | `auto` | `auto` (from `recordings.csv`, else the NWB `Subject.species`, else human), `human`, `pig`, `dog`, `rabbit`, `rat`, `mouse` |
 | `DETECTOR` | `neurokit` | NeuroKit2 R-peak detector (list above) |
-| `ECG_CHANNEL` | `auto` | channel to analyse; `auto` = first ECG not marked flat/saturated. A second ECG lead is used for `agreement_other_lead` |
+| `ECG_CHANNEL` | `auto` | channel to analyse; `auto` = the first raw ECG (channels.csv `derived_from` empty) not marked flat/saturated, even when `noisy` (said in `qc.csv` notes); a processed copy only when no usable raw ECG exists. A second, independent raw lead is used for `agreement_other_lead`; a channel and its copy are never paired |
 | `INVERT` | `auto` | inverted lead: `auto`, `true`, `false` |
 | `ARTIFACT_CORRECTION` | `kubios` | beat labelling: `kubios` (Lipponen and Tarvainen classes + range), `range`, `none` |
 | `ARTIFACT_MIN_PCT` | `10` | keep a Kubios flag only above this RR deviation from the local median (%) |
@@ -162,7 +176,7 @@ also work merged side by side.
 | `beats.csv` | `recording_id, beat, time_s, rr_ms` (interval ending at the beat; empty for the first beat of a segment), `label` (`N`, `ectopic`, `artifact`), `detector` |
 | `series.csv` | `recording_id, time_s, variable, value, valid`; variables `hr_bpm`, `rr_ms` and, with a device heart-rate channel, `hr_device_bpm` (bin means). Grid points only inside recorded segments |
 | `hrv.csv` | `recording_id, scope` (`recording` or `<event_id>:baseline/during/after`), `metric, value, n_beats, window_s`. Metrics and units: `mean_nn` ms, `mean_hr` bpm, `sdnn` ms, `rmssd` ms, `sdsd` ms, `pnn50` %, `pnnx` % (species threshold), `cvnn`, `vlf`/`lf`/`hf`/`total_power` ms², `lf_hf`, `lf_nu`/`hf_nu` %, `lf_peak`/`hf_peak` Hz, `sd1`/`sd2` ms, `sd1_sd2`, `dfa_alpha1`, `dfa_alpha2`, `sampen`. Empty value = window too short (reason in `qc.csv` notes) |
-| `qc.csv` | `recording_id, detector, n_beats, pct_ectopic, pct_artifact, agreement_with_second_detector, signal_quality` (mean NeuroKit2 `averageQRS` template match, 0-1), then `channel, sampling_rate_hz, species, inverted, mean_hr_bpm, agreement_other_lead, hr_device_mae_bpm, hr_device_r, notes` |
+| `qc.csv` | `recording_id, detector, n_beats, pct_ectopic, pct_artifact, agreement_with_second_detector, signal_quality` (mean NeuroKit2 `averageQRS` template match, 0-1), then `channel, sampling_rate_hz, species, inverted, mean_hr_bpm, agreement_other_lead, other_lead` (an independent raw lead only), `hr_device_mae_bpm, hr_device_r, xqrs_offset_ms, xqrs_timing_jitter_ms` (median and robust SD of the XQRS-minus-app beat times), `agreement_tight` (agreement after removing that offset, within min(10 ms, 0.1 × RRmin)), `drr_lag1_autocorr` (lag-1 autocorrelation of successive RR changes; near -0.5 when beat timing jumps within the QRS), `pct_lipponen_flagged_ungated`, `notes` |
 | `features.csv` | `recording_id, channel, feature, value`: `hrv_<metric>` (whole recording), `ecg_n_beats`, `ecg_pct_ectopic`, `ecg_pct_artifact`, `ecg_detector_agreement` |
 | `figures/<recording_id>_heart-rate.png` | heart rate over the recording (labelled beats, device HR, stimulation trains) and the first 10 s of ECG with the detected beats |
 | `figures/<recording_id>_hrv.png` | Poincaré plot and RR spectrum with the species bands |
@@ -181,11 +195,11 @@ Peak memory is the container's cgroup `memory.peak`.
 
 | Demo | Recordings | Wall time | Peak memory |
 |---|---|---|---|
-| Fantasia (human, 250 Hz, ~2 h each) | 6 | 62 s (8-12 s per recording) | 319 MB |
-| Autonomic Aging (human, 1 kHz, 15-32 min, 2 leads) | 3 | 40 s | 324 MB |
-| Discover 655 (rat, 1 kHz, 20-28 min, closed-loop stimulation epochs) | 3 | 27 s | 324 MB |
+| Fantasia (human, 250 Hz, ~2 h each) | 6 | 65 s (8-12 s per recording) | 308 MB |
+| Autonomic Aging (human, 1 kHz, 15-32 min, 2 leads) | 3 | 42 s | 331 MB |
+| Discover 655 (rat, 1 kHz, 20-28 min, closed-loop stimulation epochs) | 3 | 27 s | 328 MB |
 | Discover 349 (pig, 1 kHz, 20 trials in 5 segments, 20 trains) | 1 | 8 s | 280 MB |
-| Discover 406 (human, uncalibrated WAV, 500 Hz, 5-17 min) | 20 | 53 s | 295 MB |
+| Discover 406 (human, uncalibrated WAV, 500 Hz, 5-17 min) | 20 | 50 s | 303 MB |
 
 Memory does not grow with recording length (the ECG is read in `CHUNK_S` windows); beats and the
 series grid are kept in memory (about 100 MB per day of rodent ECG). `runtime` asks for 1 vCPU and
@@ -194,40 +208,54 @@ series grid are kept in memory (about 100 MB per day of rodent ECG). `runtime` a
 
 ## Validation
 
-All numbers from the image above, run on physio-import's outputs (the same numbers as on an earlier
-stand-in conversion of the same files). Script: `validation/validate.py`.
+All numbers from the image above, run on physio-import's outputs. Script: `validation/validate.py`.
 
 - **R-peaks vs reference annotations (PhysioNet Fantasia, 6 records, 44,164 reference beats).**
   Sensitivity 0.9995-1.0000 and positive predictivity 0.9947-0.9999 within ±50 ms
   (`wfdb.processing.compare_annotations`), per record: f1y01 0.9999/0.9999, f1o01 0.9997/0.9947,
   f2y01 0.9998/0.9995, f2o01 1.0000/0.9999, f2y02 1.0000/0.9989, f2o02 0.9995/0.9984. The beat
-  labels found 21 of 21 annotated non-normal beats in f2o02 and 75 of 125 in f2o01, but only 7 of
-  64 and 3 of 64 in f2y01 and f2y02: labelling uses RR intervals only, so a beat that is
-  morphologically abnormal but not premature stays `N`.
+  labels found 21 of 21 annotated non-normal beats (all symbols other than `N`, `?` and `Q`) in
+  f2o02 and 72 of 75 in f2o01, but only 7 of 14 and 3 of 14 in f2y01 and f2y02: labelling uses RR
+  intervals only, so a beat that is morphologically abnormal but not premature stays `N`. These
+  numbers did not change when beat timing was refined to the template fiducial.
 - **Two detectors.** NeuroKit2 and XQRS agree on 99.7-100 % of beats on every Fantasia, Aging and
-  rat recording and on 98.1-100 % of the 406 recordings.
+  rat recording and on 98.1-100 % of the 406 recordings (±50 ms, or ±30 ms in rats).
+  `agreement_tight` (after removing XQRS's median offset, ±10 ms) is ≥ 0.95 on 19 of the 33 demo
+  recordings and 0.55-0.94 on the others (the three rat trials, pig 349, f2o02 and nine 406 files):
+  XQRS's own fiducial (from QRS energy, not refined) moves within the QRS by more than 10 ms on
+  those ECGs, so this column measures both detectors. The app's own timing check,
+  `drr_lag1_autocorr`, is -0.37 to +0.22 on every demo recording (timing that jumps between two
+  points of the QRS gives about -0.5, the first version of this app gave -0.59 on rat data; the
+  app warns below -0.4).
 - **Two leads (Autonomic Aging 0001-0003).** Beats from ECG1 and ECG2 agree on 99.89-99.95 %.
   (In dataset 349 the second "lead" is the authors' processed copy of the same ECG, so its
   agreement of 1.0 is not an independent check.)
   Record 0002 needed the automatic 50 Hz notch (without it, 433 instead of 2148 beats).
-- **Rat (Discover 655, rat preset).** 6,052-8,258 beats per trial, 0.4-0.7 % artifact, detector
-  agreement 0.997-0.998. The app's heart rate correlates with the authors' heart rate
-  (`derivative/HR`, normalised, 0.5 s steps) with Pearson r = 0.917, 0.845 and 0.876 for the gain
-  2, 5 and 10 trials at the best time offset (123.5, 259.5, 245 s; the authors' traces start at the
-  controller start). The HF peak sits at 1.0 Hz in all three trials (the ventilation rate).
+- **Rat (Discover 655, rat preset).** 6,052-8,258 beats per trial, 0.4-0.7 % artifact (1.8-4.3 %
+  flagged by Lipponen and Tarvainen's classes before the Pennsieve gate), detector agreement
+  0.997-0.998. The rat QRS has two negative lobes about 7 ms apart; timing beats at the deepest
+  sample (the first version of this app) made 26 % of successive beats in the pre-stimulation
+  part of the gain-2 trial change by more than 10 bpm (lag-1 autocorrelation of RR changes -0.59,
+  |ΔRR| 90th percentile 11 ms, RR SD 3.6 ms). With the template fiducial: 0 %, +0.16, 1.8 ms and
+  1.0 ms. The app's heart rate correlates with the authors' heart rate (`derivative/HR`,
+  normalised, 0.5 s steps) with Pearson r = 0.994, 0.986 and 0.974 for the gain 2, 5 and 10 trials
+  at the best time offset (122.5, 261, 245.5 s; the authors' traces start at the controller start).
+  Whole-trial HRV: mean HR 305, 297, 286 bpm; SDNN 9.3, 11.0, 9.3 ms; RMSSD 1.3, 1.7, 1.9 ms; HF
+  power 0.9-1.2 ms² with its peak at 1.02 Hz (the ventilation rate); LF/HF 0.06-0.07.
 - **Pig (Discover 349, pig preset).** 430 beats over 20 trials, 0.5 % artifact; mean absolute
   difference from the acquisition device's heart-rate channel 0.82 bpm (r = 0.92 on the 4 Hz grid).
   With stim-events' trains linked, per-train changes in mean heart rate (during minus baseline)
-  range from -7.2 bpm (2.5 mA, 30 Hz) to +6.5 bpm (0.5 mA, 20 Hz): heart rate rises at low and
+  range from -7.2 bpm (2.5 mA, 30 Hz) to +6.6 bpm (0.5 mA, 20 Hz): heart rate rises at low and
   middle currents and falls at the highest current at 20 and 30 Hz, the sign change that
   stim-dose-response's neural fulcrum analysis looks for.
 - **HRV against published values.** Discover 406's own HRV results are not in the demo data (the
   worksheets are scanned forms and the analysis files are in a vendor format), so no comparison was
   possible. Plausibility: Fantasia RMSSD 46-73 ms in the three young subjects and 15-29 ms in the
   three elderly (the age effect the database was built to show); 406 resting RMSSD 35-91 ms with
-  HF peaks at 0.15-0.31 Hz.
+  HF peaks at 0.15-0.30 Hz.
 - **Synthetic fixture (tests).** Every planted beat found within 20 ms in the human and rat
-  recordings (≥ 97 % in 25 s pig trials), the one planted premature beat labelled `ectopic` and no
+  recordings (≥ 97 % in 25 s pig trials), every rat beat timed at the same point of a planted
+  double-lobed QRS (99th percentile of timing error 1.5 ms; 7 ms without the template fiducial), the one planted premature beat labelled `ectopic` and no
   other beat labelled, the inverted rat lead detected, HF and LF peaks at the planted 0.25 and
   0.10 Hz, the planted 10/20/35 % bradycardia recovered per train in order, device heart rate within
   3 bpm, and the recording without ECG skipped with exit 0.

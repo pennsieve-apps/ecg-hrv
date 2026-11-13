@@ -106,7 +106,8 @@ HEADERS = {
     "hrv": ["recording_id", "scope", "metric", "value", "n_beats", "window_s"],
     "qc": ["recording_id", "detector", "n_beats", "pct_ectopic", "pct_artifact", "agreement_with_second_detector",
            "signal_quality", "channel", "sampling_rate_hz", "species", "inverted", "mean_hr_bpm",
-           "agreement_other_lead", "hr_device_mae_bpm", "hr_device_r", "notes"],
+           "agreement_other_lead", "other_lead", "hr_device_mae_bpm", "hr_device_r", "xqrs_offset_ms",
+           "xqrs_timing_jitter_ms", "agreement_tight", "drr_lag1_autocorr", "pct_lipponen_flagged_ungated", "notes"],
     "features": ["recording_id", "channel", "feature", "value"],
 }
 
@@ -271,21 +272,40 @@ def peak_rss_mb() -> float:
     return r / 2**20 if sys.platform == "darwin" else r / 1024
 
 
-def choose_ecg(rec: I.Recording, wanted: str) -> tuple[I.Channel | None, list[I.Channel], str]:
+def _independent(c: I.Channel, chosen: I.Channel) -> bool:
+    """A second lead only when both are raw and neither is a copy of the other."""
+    return (c is not chosen and not c.derived_from and not chosen.derived_from
+            and c.status not in ("flat", "saturated"))
+
+
+def choose_ecg(rec: I.Recording, wanted: str) -> tuple[I.Channel | None, list[I.Channel], str, str]:
+    """(channel, independent second leads, reason when none, note). Raw channels are preferred over
+    processed copies (channels.csv derived_from), even when the raw one is noisy; a copy is used
+    only when no usable raw ECG exists, and never as a second lead."""
     ecgs = rec.of_type("ecg")
     if wanted and wanted.lower() != "auto":
         named = [c for c in rec.channels if wanted in (c.name, c.original_name)]
         if not named:
-            return None, [], f"ECG_CHANNEL {wanted!r} not in this recording"
-        return named[0], [c for c in ecgs if c is not named[0]], ""
+            return None, [], f"ECG_CHANNEL {wanted!r} not in this recording", ""
+        ch = named[0]
+        note = f"ECG_CHANNEL={wanted} is derived from {ch.derived_from}" if ch.derived_from else ""
+        return ch, [c for c in ecgs if _independent(c, ch)], "", note
     if not ecgs:
-        return None, [], "no ECG channel"
+        return None, [], "no ECG channel", ""
     usable = [c for c in ecgs if c.status not in ("flat", "saturated")]
     if not usable:
-        return None, [], "every ECG channel is flat or saturated (channels.csv status)"
+        return None, [], "every ECG channel is flat or saturated (channels.csv status)", ""
     rank = {"good": 0, "noisy": 1}
-    usable.sort(key=lambda c: (rank.get(c.status, 2), c.name))
-    return usable[0], usable[1:], ""
+    raw = sorted((c for c in usable if not c.derived_from), key=lambda c: (rank.get(c.status, 2), c.name))
+    if raw:
+        ch = raw[0]
+        note = ""
+        if ch.status != "good":
+            note = f"raw ECG {ch.name} is {ch.status} ({ch.status_description or 'channels.csv'}): used, as raw is preferred over processed copies"
+        return ch, [c for c in raw[1:] if _independent(c, ch)], "", note
+    derived = sorted(usable, key=lambda c: (rank.get(c.status, 2), c.name))
+    ch = derived[0]
+    return ch, [], "", f"no usable raw ECG: used {ch.name}, a processed copy (derived_from {ch.derived_from})"
 
 
 def event_windows(events: list, baseline_s: float, after_s: float, t_end: float) -> list[tuple]:
@@ -319,12 +339,12 @@ def process(rec: I.Recording, p: dict, events: list, out: Path, writer: Writer, 
                 warnings_.append(f"{rec.rid}: species {rec.species!r} has no preset; used human (set SPECIES)")
     preset = P.PRESETS[species]
     s, extra = settings_for(preset, p)
-    ch, others, why = choose_ecg(rec, p["ecg_channel"])
+    ch, others, why, ch_note = choose_ecg(rec, p["ecg_channel"])
     if ch is None:
         log.info("%s: skipped (%s); channel types: %s", rec.rid, why,
                  "|".join(sorted({c.type for c in rec.channels})) or "none")
         return {"status": "skipped", "reason": why, "species": species, "seconds": round(time.time() - t_start, 2)}
-    notes = []
+    notes = [ch_note] if ch_note else []
     if not ch.calibrated:
         notes.append("ECG uncalibrated: timing only, no amplitudes")
     if s.detector != "neurokit" and species not in ("human",):
@@ -414,6 +434,17 @@ def process(rec: I.Recording, p: dict, events: list, out: Path, writer: Writer, 
             if rd3.segments:
                 det2 = E.detect(rd3, s2)
                 other_agree = E.agreement(det.times, det2.times, s.tolerance_s)
+    xq_off = xq_jit = agree_tight = None
+    if det.xqrs_times is not None:
+        o, j = E.timing_jitter(det.times, det.xqrs_times, s.tolerance_s)
+        if np.isfinite(o):
+            xq_off, xq_jit = 1000 * o, 1000 * j
+            agree_tight = E.agreement(det.times, det.xqrs_times - o, min(0.01, 0.1 * s.rr_min_s))
+    ac1 = E.drr_autocorr(beats)
+    if ac1 is not None and ac1 < -0.4:
+        warnings_.append(f"{rid}: successive RR changes alternate (lag-1 autocorrelation {ac1:.2f}); beat timing "
+                         f"may jump between parts of the QRS: check the ECG figure")
+    ungated = 100.0 * beats.counts["lipponen_flagged_ungated"] / max(n, 1)
     if agree is not None and agree < 0.9:
         warnings_.append(f"{rid}: the two R-peak detectors agree on only {100 * agree:.0f} % of beats; check the ECG figure")
     if pct_art > 10:
@@ -424,7 +455,9 @@ def process(rec: I.Recording, p: dict, events: list, out: Path, writer: Writer, 
                          f"check SPECIES")
     writer.rows("qc", [(rid, s.detector, n, fmt(pct_ect, 4), fmt(pct_art, 4), fmt(agree, 4), fmt(det.quality, 4),
                         ch.name, fmt(det.fs, 6), species, "true" if det.inverted else "false", fmt(mean_hr, 5),
-                        fmt(other_agree, 4), fmt(dev_mae, 4), fmt(dev_r, 4), "; ".join(notes))])
+                        fmt(other_agree, 4), others[0].name if (others and other_agree is not None) else "",
+                        fmt(dev_mae, 4), fmt(dev_r, 4), fmt(xq_off, 4), fmt(xq_jit, 4), fmt(agree_tight, 4),
+                        fmt(ac1, 3), fmt(ungated, 4), "; ".join(n_ for n_ in notes if n_))])
     # features.csv
     feats = [(rid, "", f"hrv_{m}", fmt(v)) for m, v in rec_vals.items() if v is not None]
     feats += [(rid, ch.name, "ecg_n_beats", n), (rid, ch.name, "ecg_pct_ectopic", fmt(pct_ect, 4)),
@@ -468,7 +501,13 @@ def process(rec: I.Recording, p: dict, events: list, out: Path, writer: Writer, 
     if dev_mae is not None:
         head["hr_device_mae_bpm"] = num(dev_mae, 2)
     return {"status": "ok", "seconds": round(secs, 2), "species": species, "species_from": sp_from,
-            "channel": ch.name, "calibrated": ch.calibrated, "headline": head, "preset_used": extra["used"]}
+            "channel": ch.name, "calibrated": ch.calibrated, "headline": head, "preset_used": extra["used"],
+            "beat_labels": {"method": (f"Lipponen & Tarvainen 2019 classes (NeuroKit2 signal_fixpeaks, Kubios) with a "
+                                       f"Pennsieve gate: a flag is kept only when the RR interval differs from the "
+                                       f"median of the 11 around it by more than {s.artifact_min_pct:g} %; plus "
+                                       f"RR outside {s.rr_min_s:g}-{s.rr_max_s:g} s")
+                            if s.artifact_method == "kubios" else s.artifact_method,
+                            "counts": beats.counts}}
 
 
 def main() -> int:

@@ -47,6 +47,8 @@ class Channel:
     calibrated: bool = True
     status: str = "good"
     original_name: str = ""
+    status_description: str = ""
+    derived_from: str = ""      # channels.csv: empty for a raw channel, else its source channel
 
 
 @dataclass
@@ -180,6 +182,8 @@ def find_recordings(root: Path, species_param: str | None = None) -> list[Record
                 c.calibrated = _truthy(row.get("calibrated", "true"))
                 c.status = row.get("status") or "good"
                 c.original_name = row.get("original_name") or c.original_name
+                c.derived_from = row.get("derived_from", "") or ""
+                c.status_description = row.get("status_description", "") or ""
                 try:
                     c.fs = float(row.get("sampling_rate_hz") or c.fs)
                 except ValueError:
@@ -304,9 +308,12 @@ def _num(v) -> float:
 
 
 def find_events(root: Path) -> tuple[dict[str, list[Event]], list[str]]:
-    """Stimulation and block trains from every events.tsv under root. stim-events' file (in a
-    `stim-events/` folder) wins over physio-import's markers for the same recording."""
-    tsvs = [f for f in walk(root) if f.name == "events.tsv"]
+    """Stimulation and block trains from stim-events' events.tsv. physio-import's events.tsv (the
+    one beside a recordings.csv: raw markers) is never read, as conventions.md asks; any other
+    events.tsv is, with files in a `stim-events/` folder first."""
+    files = list(walk(root))
+    index_dirs = {f.parent.resolve() for f in files if f.name == "recordings.csv"}
+    tsvs = [f for f in files if f.name == "events.tsv" and f.parent.resolve() not in index_dirs]
     tsvs.sort(key=lambda p: 0 if "stim-events" in p.parts else 1)
     out: dict[str, list[Event]] = {}
     used: list[str] = []

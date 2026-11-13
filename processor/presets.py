@@ -4,14 +4,14 @@ its source. Every value can be overridden by its own parameter (see main.read_pa
 
 Sources (verified DOIs, full references in CITATION.cff):
   TF     Task Force of the ESC and NASPE 1996, Circulation 93:1043, doi:10.1161/01.CIR.93.5.1043
-         (human frequency bands; "about 1 min is needed to assess the HF components while
-         approximately 2 min are needed to address the LF component").
+         (human frequency bands; its standard short-term window of 5 min, as tabulated in PZ
+         Table 3).
   PZ     Behar et al. 2018, PhysioZoo, Front Physiol 9:1390, doi:10.3389/fphys.2018.01390:
          Table 2 (RRmin, RRmax, typical HR and QRS duration), Table 3 (bands, pNNxx), and the
          PhysioZoo configuration files Config/qrs.<species>-ecg.yml (jqrs band-pass lcf/hcf and
          refractory period rp). Numbers only; no PhysioZoo code is used (it is GPL-3.0).
          PZ's mouse bands come from Behar et al. 2018, Front Physiol 9:1001, doi:10.3389/fphys.2018.01001
-         (Gaussian-mixture bands), with the HF upper edge raised to 5 Hz after Thireau et al. 2008
+         (Gaussian-mixture bands), with the HF upper edge raised to 5 Hz after Thireau et al. 2007
          (doi:10.1113/expphysiol.2007.040733).
   CARN   Carnevali et al. 2023, Front Physiol 14:1170320, doi:10.3389/fphys.2023.1170320:
          rat "LF, 0.2-0.75 Hz" and "HF, 0.75-2.5 Hz".
@@ -103,7 +103,7 @@ PRESETS: dict[str, Preset] = {
         "mouse", 608, 0.00718, 0.05, 0.24, (3.0, 300.0), 0.030, *_scaled_nk(608, 0.00718),
         (0.0056, 0.152), (0.152, 1.24), (1.24, 5.0), 5, 10, 0.5, 10, 10,
         {"detector": _PZ_DET + "; NK windows scaled to HR and QRS",
-         "bands": _PZ_HRV + " (from Behar et al. 2018b; HF upper edge 5 Hz after Thireau et al. 2008)", "pnn": _PZ_HRV, "other": _PENN_COMMON}),
+         "bands": _PZ_HRV + " (from Behar et al. 2018b; HF upper edge 5 Hz after Thireau et al. 2007)", "pnn": _PZ_HRV, "other": _PENN_COMMON}),
     "rat": Preset(
         # No published PhysioZoo rat preset: detector numbers are a Pennsieve choice between the
         # rabbit and mouse presets, wide enough for anaesthetised rats and for vagal bradycardia
@@ -139,14 +139,14 @@ def resolve(name: str | None) -> str | None:
     return None
 
 
-def min_window_s(band: tuple, kind: str) -> float:
-    """Shortest window for a band's power, from the Task Force rule for humans (about 1 min for HF
-    with its 0.15 Hz lower edge = 10 cycles; about 2 min for LF with its 0.04 Hz lower edge = 4.8
-    cycles), applied to each species' band edges. VLF needs 10 cycles of its upper edge (250 s in
-    humans), so VLF is only reported from long windows."""
-    lo, hi = band
-    if kind == "hf":
-        return 10.0 / lo
-    if kind == "lf":
-        return 4.8 / lo if lo > 0 else 4.8 / (hi / 4.5)
-    return 10.0 / hi
+VLF_FLOOR_HZ = 0.0033   # lower edge used for the window rule when a band starts at 0 Hz (pig VLF)
+
+
+def min_window_s(band: tuple, kind: str = "") -> float:
+    """Shortest window for a band's power: 10 cycles of the band's lower edge. This is a Pennsieve
+    rule. Secondary sources attribute "at least 10 times the wavelength of the lower frequency
+    bound" to the Task Force (whose standard short-term window is 5 min); we apply it to every
+    band and species. Human: HF 67 s, LF 250 s, VLF 3333 s (VLF only from long recordings). A
+    band starting at 0 Hz (the pig VLF) uses 0.0033 Hz."""
+    lo = band[0] if band[0] > 0 else VLF_FLOOR_HZ
+    return 10.0 / lo

@@ -46,7 +46,7 @@ def fantasia(out: Path, data: Path):
         c = wp.compare_annotations(ref, det, int(round(0.05 * fs)))
         nonn = np.mean([r["label"] != "N" for r in mine]) * 100
         sym = np.asarray(ann.symbol)[np.isin(ann.symbol, list(beat_syms))]
-        ref_x = ref[sym != "N"]
+        ref_x = ref[~np.isin(sym, ["N", "?", "Q"])]   # unclassified beats are not "non-normal"
         lab_x = det[np.array([r["label"] != "N" for r in mine])]
         hit = sum(np.any(np.abs(lab_x - r) <= int(round(0.05 * fs))) for r in ref_x)
         print(f"{rid},{ref.size},{det.size},{c.sensitivity:.4f},{c.positive_predictivity:.4f},{nonn:.2f},"

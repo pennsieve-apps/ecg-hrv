@@ -71,6 +71,22 @@ def test_r_peaks_match_truth(result, rid):
     assert ppv >= 0.995, (rid, ppv)
 
 
+def test_fiducial_stable_on_double_lobed_qrs(result):
+    """The rat QRS has two lobes of near-equal size 7 ms apart: every beat must be timed at the
+    same point of the QRS (no jumping between lobes)."""
+    out, truth, _ = result
+    rid = "sub-r01_rec-vns"
+    det = np.array([float(r["time_s"]) for r in rows(out / "beats.csv") if r["recording_id"] == rid])
+    ref = np.array(truth[rid]["beats_s"])
+    j = np.clip(np.searchsorted(det, ref), 1, det.size - 1)
+    near = np.where(np.abs(det[j] - ref) < np.abs(det[j - 1] - ref), det[j], det[j - 1])
+    err = (near - ref) * 1000.0
+    err = err - np.median(err)
+    assert np.percentile(np.abs(err), 99) < 1.5, np.percentile(np.abs(err), [50, 90, 99])
+    qc = {r["recording_id"]: r for r in rows(out / "qc.csv")}
+    assert float(qc[rid]["drr_lag1_autocorr"]) > -0.3   # lobe jumping gives about -0.5
+
+
 def test_ectopic_beat_labelled(result):
     out, truth, _ = result
     beats = [r for r in rows(out / "beats.csv") if r["recording_id"] == "sub-h01_rec-rest"]
@@ -121,7 +137,7 @@ def test_stimulation_bradycardia_grows_with_amplitude(result):
         # the effect ramps in over 2 s of a 10 s train: mean increase is ~90 % of the planted one
         assert dur / base - 1 == pytest.approx(0.9 * tr["rr_increase"], rel=0.25)
     assert drops == sorted(drops)
-    # 10 s windows: no LF/HF (needs >= 24 s for the rat LF band), with the reason in qc.csv
+    # 10 s windows: no LF/HF (needs >= 50 s for the rat LF band), with the reason in qc.csv
     assert hrv_value(hrv, rid, "stim-0001:during", "lf_hf") is None
     qc = {r["recording_id"]: r for r in rows(out / "qc.csv")}
     assert "shorter than" in qc[rid]["notes"]
@@ -240,9 +256,10 @@ def test_presets_well_formed():
         assert {"detector", "bands", "pnn", "other"} <= set(p.sources), name
     assert P.resolve("Rattus norvegicus") == "rat" and P.resolve("Sus scrofa domesticus") == "pig"
     assert P.resolve("Homo sapiens") == "human" and P.resolve("zebrafish") is None
-    # Task Force: about 1 min for HF and 2 min for LF in humans
+    # 10 cycles of the lower edge (Pennsieve rule): human HF 67 s, LF 250 s
     assert P.min_window_s(P.PRESETS["human"].hf_hz, "hf") == pytest.approx(66.7, abs=0.1)
-    assert P.min_window_s(P.PRESETS["human"].lf_hz, "lf") == pytest.approx(120, abs=0.1)
+    assert P.min_window_s(P.PRESETS["human"].lf_hz, "lf") == pytest.approx(250, abs=0.1)
+    assert P.min_window_s(P.PRESETS["pig"].vlf_hz, "vlf") == pytest.approx(3030.3, abs=0.1)
 
 
 def test_fixture_is_valid_nwb(tmp_path):
@@ -265,3 +282,32 @@ def test_app_yml_matches_code():
     assert set(params["DETECTOR"]["validValues"]) == set(E.DETECTORS)
     assert set(params["SPECIES"]["validValues"]) == {"auto", *P.SPECIES}
     assert (app["runtime"]["cpu"], app["runtime"]["memory"]) == (1024, 2048)
+
+
+def test_raw_channel_preferred_and_never_paired_with_its_copy():
+    from processor import inputs as I
+    from processor import main as M
+    raw = I.Channel("ecg", "ecg", status="noisy", status_description="spikes")
+    copy = I.Channel("ecg-2", "ecg", status="good", derived_from="ecg")
+    lead2 = I.Channel("ecg-3", "ecg", status="good")
+    ch, others, why, note = M.choose_ecg(I.Recording("r", None, channels=[raw, copy]), "auto")
+    assert ch is raw and others == [] and "noisy" in note
+    ch, others, _, _ = M.choose_ecg(I.Recording("r", None, channels=[raw, copy, lead2]), "auto")
+    assert ch is lead2 and others == [raw]            # good raw first; the copy is never a second lead
+    flat = I.Channel("ecg", "ecg", status="flat")
+    ch, others, _, note = M.choose_ecg(I.Recording("r", None, channels=[flat, copy]), "auto")
+    assert ch is copy and others == [] and "processed copy" in note
+
+
+def test_physio_import_events_are_not_read(tmp_path):
+    from processor import inputs as I
+    hdr = "recording_id\tonset\tduration\ttrial_type\tevent_id\n"
+    (tmp_path / "physio").mkdir()
+    (tmp_path / "physio/recordings.csv").write_text("recording_id,path\nr,r.nwb\n")
+    (tmp_path / "physio/events.tsv").write_text(hdr + "r\t5\t1\tstimulation\tm-1\n")
+    ev, used = I.find_events(tmp_path)
+    assert ev == {} and used == []
+    (tmp_path / "events/stim-events").mkdir(parents=True)
+    (tmp_path / "events/stim-events/events.tsv").write_text(hdr + "r\t9\t2\tstimulation\tstim-0001\n")
+    ev, used = I.find_events(tmp_path)
+    assert [e.event_id for e in ev["r"]] == ["stim-0001"]

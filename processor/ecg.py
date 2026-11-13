@@ -143,6 +143,70 @@ def _find_peaks(clean: np.ndarray, fs: float, s: Settings) -> np.ndarray:
     return pk
 
 
+def refine_fiducials(clean: np.ndarray, pk: np.ndarray, fs: float, qrs_s: float) -> tuple[np.ndarray, np.ndarray]:
+    """Move every detected peak to one stable point of the QRS: the beats are aligned to their
+    median QRS template by cross-correlation (lags up to half a QRS width, sub-sample by parabolic
+    interpolation), and the fiducial is the template's largest absolute deflection. A detector's
+    own peak is the deepest or highest sample, which jumps between two lobes of near-equal size
+    (e.g. a notched or biphasic rodent QRS) and adds RR jitter of the lobe spacing. Beats that do
+    not resemble the template (correlation < 0.5: ectopic, noise) keep the detector's peak.
+    Returns (fractional sample positions, correlation with the template)."""
+    pos = pk.astype(np.float64)
+    corr = np.full(pk.size, np.nan)
+    h = max(2, int(round(qrs_s * fs)))
+    lag = max(1, int(round(0.5 * qrs_s * fs)))
+    ok = np.nonzero((pk - h - lag >= 0) & (pk + h + lag + 1 <= clean.size))[0]
+    if ok.size < 5:
+        return pos, corr
+    idx = pk[ok][:, None] + np.arange(-h - lag, h + lag + 1)[None, :]
+    segs = clean[idx]                                    # beats x (2h + 2lag + 1)
+    tmpl = np.median(segs[:, lag:lag + 2 * h + 1], axis=0)
+    tmpl = tmpl - tmpl.mean()
+    tn = np.linalg.norm(tmpl)
+    if tn == 0:
+        return pos, corr
+    cc = np.empty((ok.size, 2 * lag + 1))
+    for j, L in enumerate(range(-lag, lag + 1)):
+        w = segs[:, lag + L:lag + L + 2 * h + 1]
+        w = w - w.mean(axis=1, keepdims=True)
+        cc[:, j] = (w @ tmpl) / (np.linalg.norm(w, axis=1) * tn + 1e-30)
+    best = np.argmax(cc, axis=1)
+    frac = np.zeros(ok.size)
+    inner = (best > 0) & (best < 2 * lag)
+    r = np.arange(ok.size)[inner]
+    y0, y1, y2 = cc[r, best[inner] - 1], cc[r, best[inner]], cc[r, best[inner] + 1]
+    den = y0 - 2 * y1 + y2
+    frac[inner] = np.where(np.abs(den) > 1e-12, 0.5 * (y0 - y2) / np.where(den == 0, 1, den), 0.0)
+    shift = best - lag + np.clip(frac, -0.5, 0.5)
+    anchor = int(np.argmax(np.abs(tmpl))) - h            # template's largest deflection
+    cmax = cc[np.arange(ok.size), best]
+    good = cmax >= 0.5
+    pos[ok[good]] = pk[ok[good]] + shift[good] + anchor
+    corr[ok] = cmax
+    pos = np.clip(pos, 0, clean.size - 1)
+    return pos, corr
+
+
+def timing_jitter(a: np.ndarray, b: np.ndarray, tol: float) -> tuple[float, float]:
+    """(median offset b - a, robust SD of the offsets) in seconds over one-to-one matches."""
+    i = j = 0
+    d = []
+    while i < len(a) and j < len(b):
+        x = b[j] - a[i]
+        if abs(x) <= tol:
+            d.append(x)
+            i, j = i + 1, j + 1
+        elif x < 0:
+            j += 1
+        else:
+            i += 1
+    if len(d) < 10:
+        return float("nan"), float("nan")
+    d = np.asarray(d)
+    med = float(np.median(d))
+    return med, float(1.4826 * np.median(np.abs(d - med)))
+
+
 def _xqrs(raw: np.ndarray, fs: float, s: Settings) -> np.ndarray:
     scale = np.subtract(*np.percentile(raw, [99.5, 0.5]))
     if not np.isfinite(scale) or scale <= 0:
@@ -231,9 +295,11 @@ def detect(reader: I.SeriesReader, s: Settings, progress=None) -> Detection:
                 continue
             clean = _bandpass(raw, fs, s.filter_band, mains)
             pk = _find_peaks(clean, fs, s)
-            core = pk[(pk + ra >= a) & (pk + ra < b)]
+            pos, _ = refine_fiducials(clean, pk, fs, s.preset.qrs_s)
+            keep = (np.round(pos) + ra >= a) & (np.round(pos) + ra < b)
+            core = pk[keep]
             t = reader.times(seg, ra, rb)
-            times.append(t[core])
+            times.append(np.interp(pos[keep], np.arange(t.size), t))
             segix.append(np.full(core.size, k))
             if core.size:
                 amps.append(np.median(clean[core]))
@@ -254,9 +320,11 @@ def detect(reader: I.SeriesReader, s: Settings, progress=None) -> Detection:
             if strip is None and core.size >= 3:
                 w0 = max(0, int(core[0] - 0.5 * fs))
                 w1 = min(raw.size, w0 + int(10 * fs))
-                sel = core[(core >= w0) & (core < w1)]
-                strip = {"t": t[w0:w1], "x": raw[w0:w1], "peaks_t": t[sel], "peaks_x": raw[sel],
-                         "fs": fs}
+                pc = pos[keep]
+                sel = pc[(pc >= w0) & (pc < w1)]
+                si = np.clip(np.round(sel).astype(int), 0, raw.size - 1)
+                strip = {"t": t[w0:w1], "x": raw[w0:w1], "peaks_t": np.interp(sel, np.arange(t.size), t),
+                         "peaks_x": raw[si], "fs": fs}
             if progress:
                 progress(b, seg)
     times_a = np.concatenate(times) if times else np.zeros(0)
@@ -287,7 +355,8 @@ def label_beats(det: Detection, s: Settings) -> Beats:
     n = t.size
     labels = np.array(["N"] * n, dtype=object)
     rr = np.full(n, np.nan)
-    counts = {"ectopic": 0, "missed": 0, "extra": 0, "longshort": 0, "out_of_range": 0}
+    counts = {"ectopic": 0, "missed": 0, "extra": 0, "longshort": 0, "out_of_range": 0,
+              "lipponen_flagged_ungated": 0}
     for k in np.unique(seg):
         idx = np.nonzero(seg == k)[0]
         if idx.size < 2:
@@ -312,6 +381,10 @@ def label_beats(det: Detection, s: Settings) -> Beats:
             def big(j: int) -> bool:
                 return any(dev[k] > s.artifact_min_pct for k in (j, j + 1) if 0 <= k < idx.size)
 
+            ungated = set()
+            for key in ("ectopic", "missed", "extra", "longshort"):
+                ungated |= {int(j) for j in art.get(key, []) if 0 <= j < idx.size}
+            counts["lipponen_flagged_ungated"] += len(ungated)
             ect = set()
             for i in np.asarray(art.get("ectopic", []), dtype=int):
                 # NeuroKit2 reports an ectopic pattern at the beat after the premature one (whose
@@ -344,6 +417,21 @@ def label_beats(det: Detection, s: Settings) -> Beats:
         ok &= ~(np.isfinite(rr) & ((rr < s.rr_min_s * 1000) | (rr > s.rr_max_s * 1000)))
     nn_idx = np.nonzero(ok)[0]
     return Beats(t, rr, labels, seg, rr[nn_idx], t[nn_idx], t[nn_idx - 1] if nn_idx.size else np.zeros(0), counts)
+
+
+def drr_autocorr(beats: "Beats") -> float | None:
+    """Lag-1 autocorrelation of successive NN-interval differences. Beat timing that jumps between
+    two points of the QRS makes it strongly negative (about -0.5); physiology rarely does."""
+    x, t = beats.nn_ms, beats.nn_t
+    if x.size < 30:
+        return None
+    succ = np.abs(t[1:] - x[1:] / 1000.0 - t[:-1]) < 1e-3
+    d = np.diff(x)
+    ok = succ[1:] & succ[:-1] if succ.size > 1 else np.zeros(0, dtype=bool)
+    a, b = d[:-1][ok], d[1:][ok]
+    if a.size < 20 or np.std(a) == 0 or np.std(b) == 0:
+        return None
+    return float(np.corrcoef(a, b)[0, 1])
 
 
 # --------------------------------------------------------------------------- HRV in a window

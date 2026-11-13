@@ -94,7 +94,7 @@ def hrv_figure(path: Path, rid: str, beats, settings, interp_hz: float) -> bool:
     g = np.arange(pt[0], pt[-1], 1.0 / interp_hz) if pt.size > 4 else np.zeros(0)
     if g.size >= 64:
         y = sps.detrend(np.interp(g, pt, px))
-        nper = min(g.size, int(interp_hz * 4.8 / max(settings.bands["lf"][0], 1e-3)))
+        nper = min(g.size, int(interp_hz * 10.0 / max(settings.bands["lf"][0], 1e-3)))
         f, p = sps.welch(y, fs=interp_hz, nperseg=max(64, nper))
         top = settings.bands["hf"][1] * 1.3
         m = f <= top

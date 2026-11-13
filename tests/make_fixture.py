@@ -14,7 +14,8 @@ Recordings:
 - sub-h01_rec-rest   human, 500 Hz, 6 min: ECG (V, float32) at ~65 bpm with respiratory sinus
                      arrhythmia at 0.25 Hz and a 0.1 Hz (LF) rhythm, one premature (ectopic) beat;
                      respiration and blood pressure channels.
-- sub-r01_rec-vns    rat, 1 kHz, 4 min: inverted ECG lead stored as int16 with a conversion factor,
+- sub-r01_rec-vns    rat, 1 kHz, 4 min: inverted ECG lead with a double-lobed QRS (two lobes of
+                     near-equal, varying size 7 ms apart), stored as int16 with a conversion factor,
                      ~360 bpm, three 10 s stimulation trains with a bradycardia that grows with
                      amplitude (10, 20, 35 % longer RR); a stimulation channel.
 - sub-p01_rec-grid   pig, 1 kHz, trial-by-trial (NWB timestamps, gaps between three 25 s trials),
@@ -180,7 +181,16 @@ def write(out: Path, seed: int = 7) -> dict:
         return f_
 
     b = beat_times(0.0, dur, 60 / 360.0, rng, hf=(1.2, 0.02), lf=(0.4, 0.02), slow=slow)
-    x = -ecg_wave(t, b, 0.015, 0.06, rng, amp_mv=0.5, noise_mv=0.01)  # inverted lead
+    # inverted lead with a double-lobed QRS as in dataset 655: two negative lobes 7 ms apart whose
+    # sizes vary independently around the same value, so the deepest sample jumps between them
+    x = 0.05e-3 * np.sin(2 * np.pi * 0.3 * t) + rng.normal(0, 0.01e-3, t.size)
+    sig = 0.0015
+    for bt in b:
+        a_, z_ = np.searchsorted(t, [bt - 0.01, bt + 0.08])
+        tt = t[a_:z_] - bt
+        x[a_:z_] += 1e-3 * (-rng.uniform(0.45, 0.55) * np.exp(-0.5 * (tt / sig) ** 2)
+                            - rng.uniform(0.45, 0.55) * np.exp(-0.5 * ((tt - 0.007) / sig) ** 2)
+                            + 0.12 * np.exp(-0.5 * ((tt - 0.045) / 0.007) ** 2))
     conv = 1e-6                                                       # int16 counts of 1 uV
     xi = np.clip(np.round(x / conv), -32768, 32767).astype(np.int16)
     stim = np.zeros(t.size, dtype=np.float32)

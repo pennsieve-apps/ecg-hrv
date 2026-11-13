@@ -58,9 +58,10 @@ parameters:
     type: string
     label: ECG channel
     description: >-
-      Channel to analyse (NWB name such as ecg-2, or the original name). auto takes the first ECG channel
-      that channels.csv does not mark flat or saturated; a second ECG lead, when present, is used to check
-      the beats (qc.csv agreement_other_lead).
+      Channel to analyse (NWB name such as ecg-2, or the original name). auto takes the first raw ECG
+      channel (channels.csv derived_from empty) not marked flat or saturated, even a noisy one; a processed
+      copy only when no usable raw ECG exists. A second, independent raw lead, when present, is used to
+      check the beats (qc.csv agreement_other_lead); a channel and its copy are never paired.
     defaultValue: auto
   - name: INVERT
     type: string
@@ -80,9 +81,10 @@ parameters:
     type: number
     label: Minimum artifact deviation (%)
     description: >-
-      A beat flagged by the kubios classes is labelled only when its RR interval differs from the median of
-      the 11 around it by more than this percentage (keeps the regular rhythm of anaesthetised animals from
-      being over-labelled). 0 keeps every flag.
+      Pennsieve gate on the Lipponen and Tarvainen classes: a flagged beat is labelled only when its RR
+      interval differs from the median of the 11 around it by more than this percentage (keeps the regular
+      rhythm of anaesthetised animals from being over-labelled). 0 keeps every flag, i.e. their method
+      unchanged; qc.csv reports the ungated share either way.
     defaultValue: 10
     min: 0
   - name: SECOND_DETECTOR
