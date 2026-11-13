@@ -175,18 +175,17 @@ exit 2 for bad parameters.
 ## Runtime and results on the demo data
 
 Measured with the final image in Docker (**amd64 emulation on an M-series Mac**; `--cpus 1
---memory 1g`, read-only file system, uid 65534, HOME/TMPDIR under `/tmp`, as on Lambda). Peak
-memory is the container's cgroup `memory.peak`. Inputs: NWB files written to the physio-import
-contract by a stand-in converter, because physio-import was being built at the same time (see
-"Validation").
+--memory 1g`, read-only file system, uid 65534, HOME/TMPDIR under `/tmp`, as on Lambda) on
+physio-import's outputs of the demo data (`physio` port) with stim-events' `events` port linked.
+Peak memory is the container's cgroup `memory.peak`.
 
 | Demo | Recordings | Wall time | Peak memory |
 |---|---|---|---|
-| Fantasia (human, 250 Hz, ~2 h each) | 6 | 58 s (~9 s per recording) | 321 MB |
-| Autonomic Aging (human, 1 kHz, 15-32 min, 2 leads) | 3 | 40 s | 334 MB |
-| Discover 655 (rat, 1 kHz, 20-28 min) | 3 | 26 s | 330 MB |
-| Discover 349 (pig, 1 kHz, 20 trials, trial by trial) | 1 | 8 s | 279 MB |
-| Discover 406 (human, uncalibrated WAV, 500 Hz, 5-17 min) | 20 | 46 s | 297 MB |
+| Fantasia (human, 250 Hz, ~2 h each) | 6 | 62 s (8-12 s per recording) | 319 MB |
+| Autonomic Aging (human, 1 kHz, 15-32 min, 2 leads) | 3 | 40 s | 324 MB |
+| Discover 655 (rat, 1 kHz, 20-28 min, closed-loop stimulation epochs) | 3 | 27 s | 324 MB |
+| Discover 349 (pig, 1 kHz, 20 trials in 5 segments, 20 trains) | 1 | 8 s | 280 MB |
+| Discover 406 (human, uncalibrated WAV, 500 Hz, 5-17 min) | 20 | 53 s | 295 MB |
 
 Memory does not grow with recording length (the ECG is read in `CHUNK_S` windows); beats and the
 series grid are kept in memory (about 100 MB per day of rodent ECG). `runtime` asks for 1 vCPU and
@@ -195,7 +194,8 @@ series grid are kept in memory (about 100 MB per day of rodent ECG). `runtime` a
 
 ## Validation
 
-All numbers from the image above. Scripts: `validation/validate.py`.
+All numbers from the image above, run on physio-import's outputs (the same numbers as on an earlier
+stand-in conversion of the same files). Script: `validation/validate.py`.
 
 - **R-peaks vs reference annotations (PhysioNet Fantasia, 6 records, 44,164 reference beats).**
   Sensitivity 0.9995-1.0000 and positive predictivity 0.9947-0.9999 within ±50 ms
@@ -207,6 +207,8 @@ All numbers from the image above. Scripts: `validation/validate.py`.
 - **Two detectors.** NeuroKit2 and XQRS agree on 99.7-100 % of beats on every Fantasia, Aging and
   rat recording and on 98.1-100 % of the 406 recordings.
 - **Two leads (Autonomic Aging 0001-0003).** Beats from ECG1 and ECG2 agree on 99.89-99.95 %.
+  (In dataset 349 the second "lead" is the authors' processed copy of the same ECG, so its
+  agreement of 1.0 is not an independent check.)
   Record 0002 needed the automatic 50 Hz notch (without it, 433 instead of 2148 beats).
 - **Rat (Discover 655, rat preset).** 6,052-8,258 beats per trial, 0.4-0.7 % artifact, detector
   agreement 0.997-0.998. The app's heart rate correlates with the authors' heart rate
@@ -215,10 +217,10 @@ All numbers from the image above. Scripts: `validation/validate.py`.
   controller start). The HF peak sits at 1.0 Hz in all three trials (the ventilation rate).
 - **Pig (Discover 349, pig preset).** 430 beats over 20 trials, 0.5 % artifact; mean absolute
   difference from the acquisition device's heart-rate channel 0.82 bpm (r = 0.92 on the 4 Hz grid).
-  Per-train changes in mean heart rate (during minus baseline) range from -7.2 bpm (2.5 mA, 30 Hz)
-  to +6.5 bpm (0.5 mA, 20 Hz), the sign change with amplitude that stim-dose-response's neural
-  fulcrum analysis looks for. Stimulation onsets were taken as 10 s into each trial for this check
-  (the dataset's description); the workflow takes them from stim-events.
+  With stim-events' trains linked, per-train changes in mean heart rate (during minus baseline)
+  range from -7.2 bpm (2.5 mA, 30 Hz) to +6.5 bpm (0.5 mA, 20 Hz): heart rate rises at low and
+  middle currents and falls at the highest current at 20 and 30 Hz, the sign change that
+  stim-dose-response's neural fulcrum analysis looks for.
 - **HRV against published values.** Discover 406's own HRV results are not in the demo data (the
   worksheets are scanned forms and the analysis files are in a vendor format), so no comparison was
   possible. Plausibility: Fantasia RMSSD 46-73 ms in the three young subjects and 15-29 ms in the

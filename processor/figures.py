@@ -33,7 +33,11 @@ def tachogram(path: Path, rid: str, det, beats, events, device, settings, specie
         ax.scatter(beats.times[bad][ok], 60000.0 / rr[ok], s=10, marker="x", color="#cb181d",
                    label=f"ectopic or artifact beats ({int(bad.sum())})", zorder=3)
     if device is not None and device[0].size:
-        ax.plot(device[0], device[1], color="#737373", lw=0.8, alpha=0.8, label="device heart rate (hr channel)")
+        dt, dv = device
+        brk = np.nonzero(np.diff(dt) > 2.0)[0] + 1      # do not bridge gaps between trials
+        for k, (pt, pv) in enumerate(zip(np.split(dt, brk), np.split(dv, brk))):
+            ax.plot(pt, pv, color="#737373", lw=0.8, alpha=0.8,
+                    label="device heart rate (hr channel)" if k == 0 else None)
     for i, ev in enumerate(events):
         ax.axvspan(ev.onset, ev.onset + max(ev.duration, 0.0), color="#fdae6b", alpha=0.35, lw=0,
                    label="stimulation" if i == 0 else None)

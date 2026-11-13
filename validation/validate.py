@@ -17,6 +17,7 @@ Prints one CSV line per recording.
 from __future__ import annotations
 
 import csv
+import re
 import sys
 from pathlib import Path
 
@@ -65,7 +66,10 @@ def d655(out: Path, files: Path):
     series = rows(out / "series.csv")
     print("recording,authors_column,lag_s,pearson_r,n_points,app_mean_hr_bpm")
     for rid in sorted({r["recording_id"] for r in series}):
-        tag = rid.split("rec-")[-1]                                 # set01-trial01-gain02
+        m = re.search(r"set\d+-trial\d+-gain\d+", rid)                # set01-trial01-gain02
+        if not m:
+            continue
+        tag = m.group(0)
         row = perf[perf["performance id"].str.endswith(tag) & perf["performance id"].str.contains("Bimodal01")]
         if row.empty:
             continue
